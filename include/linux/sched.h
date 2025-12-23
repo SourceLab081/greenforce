@@ -21,6 +21,7 @@
 #include <linux/seccomp.h>
 #include <linux/nodemask.h>
 #include <linux/rcupdate.h>
+#include <linux/refcount.h>
 #include <linux/resource.h>
 #include <linux/latencytop.h>
 #include <linux/sched/prio.h>
@@ -109,6 +110,9 @@ struct task_group;
 
 #define task_is_stopped_or_traced(task)	((task->state & (__TASK_STOPPED | __TASK_TRACED)) != 0)
 
+#define task_contributes_to_load(task)	((task->state & TASK_UNINTERRUPTIBLE) != 0 && \
+					 (task->flags & PF_FROZEN) == 0 && \
+					 (task->state & TASK_NOLOAD) == 0)
 
 enum task_boost_type {
 	TASK_BOOST_NONE = 0,
@@ -836,7 +840,7 @@ struct task_struct {
 	randomized_struct_fields_start
 
 	void				*stack;
-	atomic_t			usage;
+	refcount_t			usage;
 	/* Per task flags (PF_*), defined further below: */
 	unsigned int			flags;
 	unsigned int			ptrace;
@@ -892,6 +896,7 @@ struct task_struct {
 	bool misfit;
 	u32 unfilter;
 	bool low_latency;
+	bool rtg_high_prio;
 #endif
 
 #ifdef CONFIG_CGROUP_SCHED
@@ -935,6 +940,14 @@ struct task_struct {
 	struct list_head		rcu_tasks_holdout_list;
 #endif /* #ifdef CONFIG_TASKS_RCU */
 
+#ifdef CONFIG_TASKS_TRACE_RCU
+	int				trc_reader_nesting;
+	int				trc_ipi_to_cpu;
+	bool				trc_reader_need_end;
+	bool				trc_reader_checked;
+	struct list_head		trc_holdout_list;
+#endif /* #ifdef CONFIG_TASKS_TRACE_RCU */
+
 	struct sched_info		sched_info;
 
 	struct list_head		tasks;
@@ -967,6 +980,7 @@ struct task_struct {
 	unsigned			sched_reset_on_fork:1;
 	unsigned			sched_contributes_to_load:1;
 	unsigned			sched_migrated:1;
+	unsigned			sched_remote_wakeup:1;
 #ifdef CONFIG_PSI
 	unsigned			sched_psi_wake_requeue:1;
 #endif
@@ -975,21 +989,6 @@ struct task_struct {
 	unsigned			:0;
 
 	/* Unserialized, strictly 'current' */
-
-	/*
-	 * This field must not be in the scheduler word above due to wakelist
-	 * queueing no longer being serialized by p->on_cpu. However:
-	 *
-	 * p->XXX = X;			ttwu()
-	 * schedule()			  if (p->on_rq && ..) // false
-	 *   smp_mb__after_spinlock();	  if (smp_load_acquire(&p->on_cpu) && //true
-	 *   deactivate_task()		      ttwu_queue_wakelist())
-	 *     p->on_rq = 0;			p->sched_remote_wakeup = Y;
-	 *
-	 * guarantees all stores of 'current' are visible before
-	 * ->sched_remote_wakeup gets used, so it can be in this word.
-	 */
-	unsigned			sched_remote_wakeup:1;
 
 	/* Bit to tell LSMs we're in execve(): */
 	unsigned			in_execve:1;
@@ -1732,6 +1731,7 @@ extern struct pid *cad_pid;
 #define PF_RANDOMIZE		0x00400000	/* Randomize virtual address space */
 #define PF_SWAPWRITE		0x00800000	/* Allowed to write to swap */
 #define PF_MEMSTALL		0x01000000	/* Stalled due to lack of memory */
+#define PF_UMH			0x02000000	/* I'm an Usermodehelper process */
 #define PF_NO_SETAFFINITY	0x04000000	/* Userland is not allowed to meddle with cpus_allowed */
 #define PF_MCE_EARLY		0x08000000      /* Early kill for mce process policy */
 #define PF_WAKE_UP_IDLE         0x10000000	/* TTWU on an idle CPU */
@@ -2121,7 +2121,6 @@ static inline void set_task_cpu(struct task_struct *p, unsigned int cpu)
 # define vcpu_is_preempted(cpu)	false
 #endif
 
-extern long msm_sched_setaffinity(pid_t pid, struct cpumask *new_mask);
 extern long sched_setaffinity(pid_t pid, const struct cpumask *new_mask);
 extern long sched_getaffinity(pid_t pid, struct cpumask *mask);
 

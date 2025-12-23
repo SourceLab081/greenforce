@@ -586,7 +586,7 @@ endmenu # "CPU/Task time and stats accounting"
 
 config CPU_ISOLATION
 	bool "CPU isolation"
-	depends on SMP || COMPILE_TEST
+	depends on SMP
 	default y
 	help
 	  Make sure that CPUs running critical tasks are not disturbed by
@@ -782,41 +782,6 @@ config UCLAMP_BUCKETS_COUNT
 	  If in doubt, use the default value.
 
 endmenu
-
-menu "FAIR Scheuler tunables"
-
-choice
-	prompt "Utilization's PELT half-Life"
-	default PELT_UTIL_HALFLIFE_32
-	help
-	  Allows choosing one of the possible values for the PELT half-life to
-	  be used for the update of the utilization of tasks and CPUs.
-	  The half-life is the amount of [ms] required by the PELT signal to
-	  build up to 50% utilization. The higher the half-life the longer it
-	  takes for a task to be represented as a big one.
-
-	  If not sure, use the default of 32 ms.
-
-config PELT_UTIL_HALFLIFE_32
-	bool "32 ms, default for server"
-
-config PELT_UTIL_HALFLIFE_16
-	bool "16 ms, suggested for interactive workloads"
-	help
-	  Use 16ms as PELT half-life value. This will increase the ramp-up and
-	  decay of utlization and load twice as fast as for the default
-	  configuration using 32ms.
-
-config PELT_UTIL_HALFLIFE_8
-	bool "8 ms, very fast"
-	help
-	  Use 8ms as PELT half-life value. This will increase the ramp-up and
-	  decay of utlization and load four time as fast as for the default
-	  configuration using 32ms.
-
-endchoice
-
-endmenu # FAIR Scheduler tunables"
 
 #
 # For architectures that want to enable the support for NUMA-affine scheduler
@@ -1640,6 +1605,11 @@ config ADVISE_SYSCALLS
 	  applications use these syscalls, you can disable this option to save
 	  space.
 
+config HAVE_ARCH_USERFAULTFD_MINOR
+	bool
+	help
+	  Arch has userfaultfd minor fault support
+
 config MEMBARRIER
 	bool "Enable membarrier() system call" if EXPERT
 	default y
@@ -1703,14 +1673,30 @@ config KALLSYMS_BASE_RELATIVE
 # end of the "standard kernel features (expert users)" menu
 
 # syscall, maps, verifier
+
+config BPF_LSM
+	bool "LSM Instrumentation with BPF"
+	depends on BPF_SYSCALL
+	depends on SECURITY
+	depends on BPF_JIT
+	help
+	  Enables instrumentation of the security hooks with eBPF programs for
+	  implementing dynamic MAC and Audit Policies.
+
+	  If you are unsure how to answer this question, answer N.
+
 config BPF_SYSCALL
 	bool "Enable bpf() system call"
 	select BPF
 	select IRQ_WORK
+	select TASKS_TRACE_RCU
 	default n
 	help
 	  Enable the bpf() system call that allows to manipulate eBPF
 	  programs and maps via file descriptors.
+
+config ARCH_WANT_DEFAULT_BPF_JIT
+	bool
 
 config BPF_JIT_ALWAYS_ON
 	bool "Permanently enable BPF JIT and remove BPF interpreter"
@@ -1728,6 +1714,12 @@ config BPF_UNPRIV_DEFAULT_OFF
 	  still reenable it by setting it to 0 later on, or permanently
 	  disable it by setting it to 1 (from which no other transition to
 	  0 is possible anymore).
+
+config BPF_JIT_DEFAULT_ON
+	def_bool ARCH_WANT_DEFAULT_BPF_JIT || BPF_JIT_ALWAYS_ON
+	depends on HAVE_EBPF_JIT && BPF_JIT
+
+source "kernel/bpf/preload/Kconfig"
 
 config USERFAULTFD
 	bool "Enable userfaultfd() system call"
@@ -2148,6 +2140,7 @@ comment "Do not forget to sign required modules with scripts/sign-file"
 choice
 	prompt "Which hash algorithm should modules be signed with?"
 	depends on MODULE_SIG
+	default MODULE_SIG_SHA512
 	help
 	  This determines which sort of hashing algorithm will be used during
 	  signature generation.  This algorithm _must_ be built into the kernel
@@ -2286,6 +2279,9 @@ config ASN1
 	  functions to call on what tags.
 
 source "kernel/Kconfig.locks"
+
+config ARCH_HAS_NON_OVERLAPPING_ADDRESS_SPACE
+	bool
 
 config ARCH_HAS_SYNC_CORE_BEFORE_USERMODE
 	bool

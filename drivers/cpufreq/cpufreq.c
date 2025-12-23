@@ -700,14 +700,9 @@ unsigned int cpuinfo_max_freq_cached;
 
 static bool should_use_cached_freq(int cpu)
 {
-	/* This is a safe check. may not be needed */
 	if (!cpuinfo_max_freq_cached)
 		return false;
 
-	/*
-	 * perfd already configure sched_lib_mask_force to
-	 * 0xf0 from user space. so re-using it.
-	 */
 	if (!(BIT(cpu) & sched_lib_mask_force))
 		return false;
 
@@ -2373,10 +2368,12 @@ static int cpufreq_set_policy(struct cpufreq_policy *policy,
 	pr_debug("starting governor %s failed\n", policy->governor->name);
 	if (old_gov) {
 		policy->governor = old_gov;
-		if (cpufreq_init_governor(policy))
+		if (cpufreq_init_governor(policy)) {
 			policy->governor = NULL;
-		else
-			cpufreq_start_governor(policy);
+		} else if (cpufreq_start_governor(policy)) {
+			cpufreq_exit_governor(policy);
+			policy->governor = NULL;
+		}
 	}
 
 	return ret;
@@ -2463,8 +2460,10 @@ int cpufreq_boost_trigger_state(int state)
 	unsigned long flags;
 	int ret = 0;
 
-	if (cpufreq_driver->boost_enabled == state)
-		return 0;
+	/*
+	 * Don't compare 'cpufreq_driver->boost_enabled' with 'state' here to
+	 * make sure all policies are in sync with global boost flag.
+	 */
 
 	write_lock_irqsave(&cpufreq_driver_lock, flags);
 	cpufreq_driver->boost_enabled = state;
