@@ -307,6 +307,8 @@ restart:
 
 	__this_cpu_write(active_softirqs, 0);
 	rcu_bh_qs();
+	if (__this_cpu_read(ksoftirqd) == current)
+		rcu_softirq_qs();
 	local_irq_disable();
 
 	pending = local_softirq_pending();
@@ -417,7 +419,6 @@ void irq_exit(void)
 
 	tick_irq_exit();
 	rcu_irq_exit();
-	trace_hardirq_exit(); /* must be last! */
 }
 
 /*
