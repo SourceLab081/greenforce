@@ -91,7 +91,6 @@
 		compatible = "qcom,eeprom";
 		cam_clk-supply = <&gcc_camss_top_gdsc>;
 		regulator-names = "cam_clk";
-		regulator-names = "cam_clk";
 		rgltr-cntrl-support;
 		pwm-switch;
 		rgltr-min-voltage = <0>;
