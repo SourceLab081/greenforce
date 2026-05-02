@@ -25,6 +25,23 @@
 #include <linux/zstd_errors.h>
 #include <linux/zstd_lib.h>
 
+/**
+ * ZSTD_CStreamWorkspaceBound() - memory needed to initialize a ZSTD_CStream
+ * @cParams: The compression parameters to be used for compression.
+ *
+ * Return:   A lower bound on the size of the workspace that is passed to
+ *           ZSTD_initCStream() and ZSTD_initCStream_usingCDict().
+ */
+size_t ZSTD_CStreamWorkspaceBound(ZSTD_compressionParameters cParams);
+
+/**
+ * ZSTD_DStreamWorkspaceBound() - memory needed to initialize a ZSTD_DStream
+ * @maxWindowSize: The maximum window size allowed for compressed frames.
+ *
+ * Return:         A lower bound on the size of the workspace that is passed to
+ *                 ZSTD_initDStream() and ZSTD_initDStream_usingDDict().
+ */
+size_t ZSTD_DStreamWorkspaceBound(size_t maxWindowSize);
 /* ======   Helper Functions   ====== */
 /**
  * zstd_compress_bound() - maximum compressed size in worst case scenario
