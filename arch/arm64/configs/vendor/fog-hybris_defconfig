@@ -954,3 +954,5 @@ CONFIG_CRYPTO_CHACHA20POLY1305=y
 CONFIG_XFRM_MIGRATE=y
 CONFIG_HAVE_MOVE_PMD=y
 CONFIG_HAVE_MOVE_PUD=y
+#fix for error: use of undeclared identifier 's2idle_state'
+CONFIG_SUSPEND=y
