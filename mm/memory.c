@@ -1565,7 +1565,7 @@ out:
  * The page does not need to be reserved.
  *
  * Usually this function is called from f_op->mmap() handler
- * under mm->mmap_sem write-lock, so it can change vma->vm_flags.
+ * under mm->mmap_lock write-lock, so it can change vma->vm_flags.
  * Caller must set VM_MIXEDMAP on vma if it wants to call this
  * function from other places, for example from page-fault handler.
  */
@@ -2843,6 +2843,47 @@ void unmap_mapping_range(struct address_space *mapping,
 	unmap_mapping_pages(mapping, hba, hlen, even_cows);
 }
 EXPORT_SYMBOL(unmap_mapping_range);
+
+#ifdef CONFIG_LRU_GEN
+static void lru_gen_enter_fault(struct vm_area_struct *vma)
+{
+	/* the LRU algorithm doesn't apply to sequential or random reads */
+	current->in_lru_fault = !(vma->vm_flags & (VM_SEQ_READ | VM_RAND_READ));
+}
+
+static void lru_gen_exit_fault(void)
+{
+	current->in_lru_fault = false;
+}
+
+static void lru_gen_swap_refault(struct page *page, swp_entry_t entry)
+{
+	void *item;
+	struct address_space *mapping = swap_address_space(entry);
+	pgoff_t index = swp_offset(entry);
+
+	if (!lru_gen_enabled())
+		return;
+
+	rcu_read_lock();
+	item = radix_tree_lookup(&mapping->i_pages, index);
+	rcu_read_unlock();
+	if (xa_is_value(item))
+		lru_gen_refault(page, item);
+}
+#else
+static void lru_gen_enter_fault(struct vm_area_struct *vma)
+{
+}
+
+static void lru_gen_exit_fault(void)
+{
+}
+
+static void lru_gen_swap_refault(struct page *page, swp_entry_t entry)
+{
+}
+#endif /* CONFIG_LRU_GEN */
 
 /*
  * We enter with non-exclusive mmap_sem (to exclude vma changes,
