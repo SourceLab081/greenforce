@@ -354,7 +354,14 @@ unsigned long zone_reclaimable_pages(struct zone *zone)
 			|| IS_ENABLED(CONFIG_HAVE_LOW_MEMORY_KILLER))
 		nr += zone_page_state_snapshot(zone, NR_ZONE_INACTIVE_ANON) +
 			zone_page_state_snapshot(zone, NR_ZONE_ACTIVE_ANON);
-
+	/*
+	 * If there are no reclaimable file-backed or anonymous pages,
+	 * ensure zones with sufficient free pages are not skipped.
+	 * This prevents zones like DMA32 from being ignored in reclaim
+	 * scenarios where they can still help alleviate memory pressure.
+	 */
+	if (nr == 0)
+		nr = zone_page_state_snapshot(zone, NR_FREE_PAGES);
 	return nr;
 }
 
@@ -962,10 +969,8 @@ static int __remove_mapping(struct address_space *mapping, struct page *page,
 	if (PageSwapCache(page)) {
 		swp_entry_t swap = { .val = page_private(page) };
 
-		if (lru_gen_enabled())
-			shadow = lru_gen_eviction(page);
 		mem_cgroup_swapout(page, swap);
-		__delete_from_swap_cache(page, shadow);
+		__delete_from_swap_cache(page);
 		xa_unlock_irqrestore(&mapping->i_pages, flags);
 		put_swap_page(page, swap);
 	} else {
@@ -2630,8 +2635,11 @@ static int get_swappiness(struct lruvec *lruvec, struct scan_control *sc)
 {
 	struct mem_cgroup *memcg = lruvec_memcg(lruvec);
 
-	if (mem_cgroup_get_nr_swap_pages(memcg) < MIN_LRU_BATCH)
+	if (mem_cgroup_get_nr_swap_pages(memcg) < MIN_LRU_BATCH) {
+		count_vm_event(current_is_kswapd() ? LRU_KSWAPD_SWAP_FULL:
+						     LRU_DIRECT_SWAP_FULL);
 		return 0;
+	}
 
 	return mem_cgroup_swappiness(memcg);
 }
@@ -3609,13 +3617,13 @@ static void walk_mm(struct lruvec *lruvec, struct mm_struct *mm, struct lru_gen_
 			break;
 
 		/* the caller might be holding the lock for write */
-		if (down_read_trylock(&mm->mmap_sem)) {
+		if (down_read_trylock(&mm->mmap_lock)) {
 			unsigned long start = walk->next_addr;
 			unsigned long end = mm->highest_vm_end;
 
 			err = walk_page_range(start, end, &args);
 
-			up_read(&mm->mmap_sem);
+			up_read(&mm->mmap_lock);
 
 			if (walk->batched) {
 				spin_lock_irq(&pgdat->lru_lock);
@@ -4168,8 +4176,13 @@ static bool isolate_page(struct lruvec *lruvec, struct page *page, struct scan_c
 		return false;
 
 	if (!(sc->may_writepage && (sc->gfp_mask & __GFP_IO)) &&
-	    (PageDirty(page) || (PageAnon(page) && !PageSwapCache(page))))
+	    (PageDirty(page) || (PageAnon(page) && !PageSwapCache(page)))) {
+		if (!sc->may_writepage)
+			__count_vm_event(LRU_NO_WRITEPAGE);
+		if (!(sc->gfp_mask & __GFP_IO))
+			__count_vm_event(LRU_NO_GFP_IO);
 		return false;
+	}
 
 	if (!get_page_unless_zero(page))
 		return false;
@@ -4414,6 +4427,10 @@ static int evict_pages(struct lruvec *lruvec, struct scan_control *sc, int swapp
 	free_unref_page_list(&list);
 
 	sc->nr_reclaimed += reclaimed;
+	if (!reclaimed) {
+		item = current_is_kswapd() ? LRU_KSWAPD_ANON : LRU_DIRECT_ANON;
+		count_vm_event(item + type);
+	}
 
 	if (type == LRU_GEN_ANON && swapped)
 		*swapped = true;
@@ -4422,7 +4439,7 @@ static int evict_pages(struct lruvec *lruvec, struct scan_control *sc, int swapp
 }
 
 static long get_nr_to_scan(struct lruvec *lruvec, struct scan_control *sc, bool can_swap,
-			   unsigned long reclaimed, bool *need_aging)
+		unsigned long reclaimed, bool *need_aging)
 {
 	int priority;
 	long nr_to_scan;
@@ -4434,7 +4451,7 @@ static long get_nr_to_scan(struct lruvec *lruvec, struct scan_control *sc, bool 
 	if (!nr_to_scan)
 		return 0;
 
-	/* adjust priority if memcg is offline or the target is met */
+
 	if (!mem_cgroup_online(memcg))
 		priority = 0;
 	else if (sc->nr_reclaimed - reclaimed >= sc->nr_to_reclaim)
@@ -4451,7 +4468,7 @@ static long get_nr_to_scan(struct lruvec *lruvec, struct scan_control *sc, bool 
 
 	/* skip the aging path at the default priority */
 	if (priority == DEF_PRIORITY)
-		goto done;
+		return nr_to_scan;
 
 	/* leave the work to lru_gen_age_node() */
 	if (current_is_kswapd())
@@ -4459,7 +4476,7 @@ static long get_nr_to_scan(struct lruvec *lruvec, struct scan_control *sc, bool 
 
 	if (try_to_inc_max_seq(lruvec, max_seq, sc, can_swap, false))
 		return nr_to_scan;
-done:
+
 	return min_seq[!can_swap] + MIN_NR_GENS <= max_seq ? nr_to_scan : 0;
 }
 
@@ -4471,8 +4488,6 @@ static void lru_gen_shrink_lruvec(struct lruvec *lruvec, struct scan_control *sc
 	bool swapped = false;
 	unsigned long reclaimed = sc->nr_reclaimed;
 	struct pglist_data *pgdat = lruvec_pgdat(lruvec);
-
-	lru_add_drain();
 
 	blk_start_plug(&plug);
 
@@ -6425,8 +6440,11 @@ restart:
 			sc.priority--;
 	} while (sc.priority >= 1);
 
-	if (!sc.nr_reclaimed)
-		pgdat->kswapd_failures++;
+	if (!sc.nr_reclaimed) {
+		count_vm_event(LRU_KSWAPD_NO_PROGRESS);
+		if (!lru_gen_enabled())
+			pgdat->kswapd_failures++;
+	}
 
 out:
 	/* If reclaim was boosted, account for the reclaim done in this pass */
@@ -7059,7 +7077,7 @@ int node_reclaim(struct pglist_data *pgdat, gfp_t gfp_mask, unsigned int order)
 		return NODE_RECLAIM_NOSCAN;
 
 	ret = __node_reclaim(pgdat, gfp_mask, order);
-	clear_bit(PGDAT_RECLAIM_LOCKED, &pgdat->flags);
+	clear_bit_unlock(PGDAT_RECLAIM_LOCKED, &pgdat->flags);
 
 	if (!ret)
 		count_vm_event(PGSCAN_ZONE_RECLAIM_FAILED);

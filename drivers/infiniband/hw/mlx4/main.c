@@ -384,10 +384,10 @@ static int mlx4_ib_del_gid(const struct ib_gid_attr *attr, void **context)
 	}
 	spin_unlock_bh(&iboe->lock);
 
-	if (!ret && hw_update) {
+	if (gids)
 		ret = mlx4_ib_update_gids(gids, ibdev, attr->port_num);
-		kfree(gids);
-	}
+
+	kfree(gids);
 	return ret;
 }
 
@@ -1171,7 +1171,7 @@ static void  mlx4_ib_vma_close(struct vm_area_struct *area)
 	 * file itself is closed, therefore no sync is needed with the regular
 	 * closing flow. (e.g. mlx4_ib_dealloc_ucontext) However need a sync
 	 * with accessing the vma as part of mlx4_ib_disassociate_ucontext.
-	 * The close operation is usually called under mm->mmap_sem except when
+	 * The close operation is usually called under mm->mmap_lock except when
 	 * process is exiting.  The exiting case is handled explicitly as part
 	 * of mlx4_ib_disassociate_ucontext.
 	 */

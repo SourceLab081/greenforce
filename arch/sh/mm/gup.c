@@ -13,7 +13,7 @@
 #include <linux/mm.h>
 #include <linux/vmstat.h>
 #include <linux/highmem.h>
-#include <asm/pgtable.h>
+#include <linux/pgtable.h>
 
 static inline pte_t gup_get_pte(pte_t *ptep)
 {
@@ -209,7 +209,7 @@ int __get_user_pages_fast(unsigned long start, int nr_pages, int write,
  * @pages:	array that receives pointers to the pages pinned.
  *		Should be at least nr_pages long.
  *
- * Attempt to pin user pages in memory without taking mm->mmap_sem.
+ * Attempt to pin user pages in memory without taking mm->mmap_lock.
  * If not successful, it will fall back to taking the lock and
  * calling get_user_pages().
  *

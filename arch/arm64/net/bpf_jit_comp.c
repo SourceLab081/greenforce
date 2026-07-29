@@ -27,6 +27,7 @@
 #include <asm/cacheflush.h>
 #include <asm/debug-monitors.h>
 #include <asm/set_memory.h>
+#include <trace/hooks/memory.h>
 
 #include "bpf_jit.h"
 
@@ -744,10 +745,18 @@ emit_cond_jmp:
 		}
 		break;
 
-	/* STX XADD: lock *(u32 *)(dst + off) += src */
-	case BPF_STX | BPF_XADD | BPF_W:
-	/* STX XADD: lock *(u64 *)(dst + off) += src */
-	case BPF_STX | BPF_XADD | BPF_DW:
+	case BPF_STX | BPF_ATOMIC | BPF_W:
+	case BPF_STX | BPF_ATOMIC | BPF_DW:
+		if (insn->imm != BPF_ADD) {
+			pr_err_once("unknown atomic op code %02x\n", insn->imm);
+			return -EINVAL;
+		}
+
+		/* STX XADD: lock *(u32 *)(dst + off) += src
+		 * and
+		 * STX XADD: lock *(u64 *)(dst + off) += src
+		 */
+
 		if (!off) {
 			reg = dst;
 		} else {
@@ -942,6 +951,8 @@ skip_init_ctx:
 			goto out_off;
 		}
 		bpf_jit_binary_lock_ro(header);
+		trace_android_vh_set_memory_ro((unsigned long)header, header->pages);
+		trace_android_vh_set_memory_x((unsigned long)header, header->pages);
 	} else {
 		jit_data->ctx = ctx;
 		jit_data->image = image_ptr;
@@ -964,24 +975,15 @@ out:
 	return prog;
 }
 
-#ifdef CONFIG_CFI_CLANG
-bool arch_bpf_jit_check_func(const struct bpf_prog *prog)
+void *bpf_jit_alloc_exec(unsigned long size)
 {
-	const uintptr_t func = (const uintptr_t)prog->bpf_func;
-
-	/*
-	 * bpf_func must be correctly aligned and within the correct region.
-	 * module_alloc places JIT code in the module region, unless
-	 * ARM64_MODULE_PLTS is enabled, in which case we might end up using
-	 * the vmalloc region too.
-	 */
-	if (unlikely(!IS_ALIGNED(func, sizeof(u32))))
-		return false;
-
-	if (IS_ENABLED(CONFIG_ARM64_MODULE_PLTS) &&
-			is_vmalloc_addr(prog->bpf_func))
-		return true;
-
-	return (func >= MODULES_VADDR && func < MODULES_END);
+	return __vmalloc_node_range(size, PAGE_SIZE, BPF_JIT_REGION_START,
+				    BPF_JIT_REGION_END, GFP_KERNEL,
+				    PAGE_KERNEL_EXEC, 0, NUMA_NO_NODE,
+				    __builtin_return_address(0));
 }
-#endif
+
+void bpf_jit_free_exec(void *addr)
+{
+	return vfree(addr);
+}

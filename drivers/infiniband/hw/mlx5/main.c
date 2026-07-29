@@ -1926,7 +1926,7 @@ static void  mlx5_ib_vma_close(struct vm_area_struct *area)
 	 * closing flow. (e.g. mlx5 ib_dealloc_ucontext)
 	 * However need a sync with accessing the vma as part of
 	 * mlx5_ib_disassociate_ucontext.
-	 * The close operation is usually called under mm->mmap_sem except when
+	 * The close operation is usually called under mm->mmap_lock except when
 	 * process is exiting.
 	 * The exiting case is handled explicitly as part of
 	 * mlx5_ib_disassociate_ucontext.
@@ -5172,7 +5172,7 @@ static int mlx5_ib_get_hw_stats(struct ib_device *ibdev,
 			 */
 			goto done;
 		}
-		ret = mlx5_lag_query_cong_counters(dev->mdev,
+		ret = mlx5_lag_query_cong_counters(mdev,
 						   stats->value +
 						   port->cnts.num_q_counters,
 						   port->cnts.num_cong_counters,

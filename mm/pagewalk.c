@@ -292,7 +292,7 @@ static int __walk_page_range(unsigned long start, unsigned long end,
  *
  * Locking:
  *   Callers of walk_page_range() and walk_page_vma() should hold
- *   @walk->mm->mmap_sem, because these function traverse vma list and/or
+ *   @walk->mm->mmap_lock, because these function traverse vma list and/or
  *   access to vma's data.
  */
 int walk_page_range(unsigned long start, unsigned long end,
@@ -308,7 +308,7 @@ int walk_page_range(unsigned long start, unsigned long end,
 	if (!walk->mm)
 		return -EINVAL;
 
-	VM_BUG_ON_MM(!rwsem_is_locked(&walk->mm->mmap_sem), walk->mm);
+	VM_BUG_ON_MM(!rwsem_is_locked(&walk->mm->mmap_lock), walk->mm);
 
 	vma = find_vma(walk->mm, start);
 	do {
@@ -351,7 +351,7 @@ int walk_page_vma(struct vm_area_struct *vma, struct mm_walk *walk)
 	if (!walk->mm)
 		return -EINVAL;
 
-	VM_BUG_ON(!rwsem_is_locked(&walk->mm->mmap_sem));
+	VM_BUG_ON(!rwsem_is_locked(&walk->mm->mmap_lock));
 	VM_BUG_ON(!vma);
 	walk->vma = vma;
 	err = walk_page_test(vma->vm_start, vma->vm_end, walk);

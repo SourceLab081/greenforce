@@ -16,7 +16,7 @@
 #include <linux/mutex.h>
 #include <linux/fs.h>
 #include <linux/highmem.h>
-#include <asm/pgtable.h>
+#include <linux/pgtable.h>
 #include <asm/mmu_context.h>
 #include <asm/cache_insns.h>
 #include <asm/cacheflush.h>
@@ -183,7 +183,7 @@ static void sh4_flush_cache_all(void *unused)
  * accessed with (hence cache set) is in accord with the physical
  * address (i.e. tag).  It's no different here.
  *
- * Caller takes mm->mmap_sem.
+ * Caller takes mm->mmap_lock.
  */
 static void sh4_flush_cache_mm(void *arg)
 {
