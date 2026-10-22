@@ -93,7 +93,7 @@ typedef unsigned long sigset_t;
 
 #include <asm-generic/signal-defs.h>
 
-#ifndef __KERNEL__
+#if !defined(__KERNEL__) && !defined(__BIONIC__)
 /* Here we must cater to libcs that poke about in kernel headers.  */
 
 struct sigaction {

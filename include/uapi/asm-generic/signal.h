@@ -100,7 +100,7 @@ typedef unsigned long old_sigset_t;
 #define __ARCH_HAS_SA_RESTORER
 #endif
 
-#ifndef __KERNEL__
+#if !defined(__KERNEL__) && !defined(__BIONIC__)
 struct sigaction {
 	__sighandler_t sa_handler;
 	unsigned long sa_flags;
